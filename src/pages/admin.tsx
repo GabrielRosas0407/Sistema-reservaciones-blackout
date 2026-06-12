@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from 'react'
 import {
   BarChart3,
   CalendarDays,
@@ -65,6 +65,7 @@ type UserForm = {
 
 const storageKey = 'blackout_admin_session'
 const minReservationDate = toDateInputValue()
+const alertDurationMs = 5000
 
 const emptyReservationForm: ReservationForm = {
   customerName: '',
@@ -104,6 +105,21 @@ function scrollToFirstAdminError() {
 
 function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
+
+function useAutoDismissMessage(
+  message: string,
+  setMessage: Dispatch<SetStateAction<string>>
+) {
+  useEffect(() => {
+    if (!message) return
+
+    const timeoutId = window.setTimeout(() => {
+      setMessage('')
+    }, alertDurationMs)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [message, setMessage])
 }
 
 function Admin() {
@@ -189,6 +205,10 @@ function AdminLogin({
   const [recoveryError, setRecoveryError] = useState('')
   const [isRecovering, setIsRecovering] = useState(false)
   const [isLoadingRecoveryAdmins, setIsLoadingRecoveryAdmins] = useState(false)
+
+  useAutoDismissMessage(error, setError)
+  useAutoDismissMessage(recoveryMessage, setRecoveryMessage)
+  useAutoDismissMessage(recoveryError, setRecoveryError)
 
   useEffect(() => {
     if (!showRecovery) return
@@ -490,6 +510,8 @@ function AdminPanel({
 
   const isAdmin = user.role === 'admin'
 
+  useAutoDismissMessage(message, setMessage)
+
   const tabs = useMemo(
     () =>
       [
@@ -714,6 +736,8 @@ function ReservationsModule({
     null
   )
   const isEditing = editingReservationId !== null
+
+  useAutoDismissMessage(error, setError)
 
   function startEdit(reservation: Reservation) {
     setEditingReservationId(reservation.id)
@@ -1521,6 +1545,9 @@ function UsersModule({
   const [deletingId, setDeletingId] = useState<number | null>(null)
   const [isSendingCode, setIsSendingCode] = useState(false)
   const [codeMessage, setCodeMessage] = useState('')
+
+  useAutoDismissMessage(error, setError)
+  useAutoDismissMessage(codeMessage, setCodeMessage)
 
   function updateField(name: keyof UserForm, value: string) {
     setForm((current) => ({
