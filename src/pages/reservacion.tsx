@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import { Gem, ShieldCheck, Star, Wine } from 'lucide-react'
 import Header from '../components/header'
@@ -30,6 +30,7 @@ const neonButton =
   'border border-pink-500 rounded-md uppercase font-black text-pink-300 shadow-[0_0_15px_rgba(236,72,153,0.8)] transition-all duration-300 hover:scale-[1.02] hover:bg-pink-500/10 hover:text-white hover:shadow-[0_0_28px_rgba(236,72,153,1)] active:scale-[0.98]'
 
 const minReservationDate = toDateInputValue()
+const alertDurationMs = 4000
 
 function scrollToFirstError() {
   window.setTimeout(() => {
@@ -56,6 +57,17 @@ function Reservacion() {
   const [successMessage, setSuccessMessage] = useState('')
   const [submitError, setSubmitError] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  useEffect(() => {
+    if (!successMessage && !submitError) return
+
+    const timeoutId = window.setTimeout(() => {
+      setSuccessMessage('')
+      setSubmitError('')
+    }, alertDurationMs)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [successMessage, submitError])
 
   function handleChange(
     event: React.ChangeEvent<

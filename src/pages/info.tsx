@@ -5,7 +5,6 @@ import {
   Camera,
   ChevronRight,
   Clock3,
-  Mail,
   MapPin,
   MessageCircle,
   Music2,
@@ -74,22 +73,15 @@ const socialLinks: SocialLink[] = [
     id: 'whatsapp',
     label: 'WhatsApp',
     value: 'Reservas y dudas',
-    href: 'https://wa.me/',
+    href: 'https://wa.me/qr/M53INKYXRLI7G1',
     icon: MessageCircle,
   },
   {
     id: 'instagram',
     label: 'Instagram',
     value: '@blackout',
-    href: 'https://www.instagram.com/',
+    href: 'https://www.instagram.com/_blackout_bar?igsh=MTdmeHprYXZmNTFvNA==',
     icon: Camera,
-  },
-  {
-    id: 'mail',
-    label: 'Correo',
-    value: 'contacto@blackout.com',
-    href: 'mailto:contacto@blackout.com',
-    icon: Mail,
   },
 ]
 

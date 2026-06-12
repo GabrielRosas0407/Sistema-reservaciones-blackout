@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { CalendarDays, Crown, Martini, Music2 } from 'lucide-react'
@@ -16,6 +16,7 @@ const neonButton =
   'border border-pink-500 rounded-md uppercase font-black text-pink-300 shadow-[0_0_15px_rgba(236,72,153,0.8)] transition-all duration-300 hover:scale-105 hover:bg-pink-500/10 hover:text-white hover:shadow-[0_0_28px_rgba(236,72,153,1)] active:scale-95'
 
 const minReservationDate = toDateInputValue()
+const alertDurationMs = 4000
 
 function Home() {
   return (
@@ -153,6 +154,16 @@ function HomeReservation() {
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>(
     {}
   )
+
+  useEffect(() => {
+    if (!Object.values(errors).some(Boolean)) return
+
+    const timeoutId = window.setTimeout(() => {
+      setErrors({})
+    }, alertDurationMs)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [errors])
 
   function updateField(name: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [name]: value }))
@@ -295,6 +306,7 @@ function HomeReservation() {
           <div className="mt-6 flex gap-4">
             <SocialButton
               label="Instagram"
+              link="https://www.instagram.com/_blackout_bar?igsh=MTdmeHprYXZmNTFvNA=="
               className="border-pink-500 text-pink-400 shadow-[0_0_14px_rgba(236,72,153,0.55)] hover:bg-pink-500/10 hover:text-pink-300 hover:shadow-[0_0_20px_rgba(236,72,153,0.95)]"
             >
               <InstagramIcon />
@@ -302,6 +314,7 @@ function HomeReservation() {
 
             <SocialButton
               label="TikTok"
+              link="https://vm.tiktok.com/ZS9jFd8TeAQSV-Rhynx/"
               className="border-emerald-400 text-emerald-400 shadow-[0_0_14px_rgba(52,211,153,0.55)] hover:bg-emerald-500/10 hover:text-emerald-300 hover:shadow-[0_0_20px_rgba(52,211,153,0.95)]"
             >
               <TikTokIcon />
@@ -492,20 +505,35 @@ function HomeFieldError({ message }: { message?: string }) {
 
 function SocialButton({
   label,
+  link,
   children,
   className,
 }: {
   label: string
+  link?: string
   children: ReactNode
   className?: string
 }) {
+  const buttonClassName = `flex h-11 w-11 items-center justify-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-95 ${className}`
+
+  if (!link) {
+    return (
+      <button type="button" aria-label={label} className={buttonClassName}>
+        {children}
+      </button>
+    )
+  }
+
   return (
-    <button
+    <a
+      href={link}
+      target="_blank"
+      rel="noopener noreferrer"
       aria-label={label}
-      className={`flex h-11 w-11 items-center justify-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-95 ${className}`}
+      className={buttonClassName}
     >
       {children}
-    </button>
+    </a>
   )
 }
 

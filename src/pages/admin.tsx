@@ -65,7 +65,7 @@ type UserForm = {
 
 const storageKey = 'blackout_admin_session'
 const minReservationDate = toDateInputValue()
-const alertDurationMs = 5000
+const alertDurationMs = 4000
 
 const emptyReservationForm: ReservationForm = {
   customerName: '',
@@ -209,6 +209,12 @@ function AdminLogin({
   useAutoDismissMessage(error, setError)
   useAutoDismissMessage(recoveryMessage, setRecoveryMessage)
   useAutoDismissMessage(recoveryError, setRecoveryError)
+
+  function clearLoginMessages() {
+    setError('')
+    setRecoveryMessage('')
+    setRecoveryError('')
+  }
 
   useEffect(() => {
     if (!showRecovery) return
@@ -356,7 +362,10 @@ function AdminLogin({
           <Input
             label="Usuario"
             value={username}
-            onChange={setUsername}
+            onChange={(value) => {
+              setUsername(value)
+              clearLoginMessages()
+            }}
             autoComplete="username"
           />
           <div className="relative">
@@ -364,7 +373,10 @@ function AdminLogin({
               label="Password"
               type={showPassword ? 'text' : 'password'}
               value={password}
-              onChange={setPassword}
+              onChange={(value) => {
+                setPassword(value)
+                clearLoginMessages()
+              }}
               autoComplete="current-password"
             />
             <button
@@ -394,7 +406,10 @@ function AdminLogin({
 
           <button
             type="button"
-            onClick={() => setShowRecovery((current) => !current)}
+            onClick={() => {
+              setShowRecovery((current) => !current)
+              clearLoginMessages()
+            }}
             className="mt-4 w-full text-sm font-bold uppercase tracking-wide text-white/55 transition hover:text-pink-200"
           >
             Recuperar password de administrador
@@ -413,7 +428,10 @@ function AdminLogin({
                   <select
                     value={recoveryAdminId}
                     disabled={isLoadingRecoveryAdmins || recoveryAdmins.length === 0}
-                    onChange={(event) => setRecoveryAdminId(event.target.value)}
+                    onChange={(event) => {
+                      setRecoveryAdminId(event.target.value)
+                      clearLoginMessages()
+                    }}
                     className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3 text-white outline-none focus:border-pink-500 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {recoveryAdmins.length === 0 && (
@@ -445,14 +463,20 @@ function AdminLogin({
                 <Input
                   label="Codigo"
                   value={recoveryCode}
-                  onChange={setRecoveryCode}
+                  onChange={(value) => {
+                    setRecoveryCode(value)
+                    clearLoginMessages()
+                  }}
                 />
                 <div className="relative">
                   <Input
                     label="Nuevo password"
                     type={showRecoveryPassword ? 'text' : 'password'}
                     value={recoveryPassword}
-                    onChange={setRecoveryPassword}
+                    onChange={(value) => {
+                      setRecoveryPassword(value)
+                      clearLoginMessages()
+                    }}
                     autoComplete="new-password"
                   />
                   <button
