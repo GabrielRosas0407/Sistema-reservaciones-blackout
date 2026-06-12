@@ -676,7 +676,7 @@ function AdminPanel({
                   users={users}
                   currentUserId={user.id}
                   onSaved={() => {
-                    setMessage('Usuario guardado.')
+                    setMessage('Usuario eliminado.')
                     refreshData()
                   }}
                 />
