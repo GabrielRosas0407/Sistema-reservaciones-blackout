@@ -47,7 +47,7 @@ Opcion manual:
 
 - Tipo: `Web Service`
 - Runtime: `Node`
-- Build Command: `npm ci && npm run build`
+- Build Command: `npm ci --include=dev && npm run build`
 - Start Command: `npm run server`
 - Health Check Path: `/api/health`
 
