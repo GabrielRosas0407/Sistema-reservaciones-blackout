@@ -14,7 +14,6 @@ export type ReservationStatus =
   | 'pending'
   | 'confirmed'
   | 'cancelled'
-  | 'completed'
 
 export type Reservation = {
   id: number
@@ -235,9 +234,38 @@ export const api = {
       token
     )
   },
+  updateReservation(
+    token: string,
+    reservationId: number,
+    payload: {
+      customerName: string
+      customerPhone: string
+      eventName: string
+      reservationDate: string
+      reservationTime: string
+      tableType: string
+      peopleCount: number
+      reservationCount: number
+      notes: string
+      rpUserId?: number
+    }
+  ) {
+    return apiRequest<{ reservation: Reservation }>(
+      `/reservations/${reservationId}`,
+      { method: 'PATCH', body: JSON.stringify(payload) },
+      token
+    )
+  },
   deleteReservation(token: string, reservationId: number) {
     return apiRequest<{ success: true }>(
       `/reservations/${reservationId}`,
+      { method: 'DELETE' },
+      token
+    )
+  },
+  deleteAllReservations(token: string) {
+    return apiRequest<{ success: true; deleted: number }>(
+      '/reservations',
       { method: 'DELETE' },
       token
     )

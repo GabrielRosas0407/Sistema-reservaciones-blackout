@@ -7,6 +7,7 @@ import {
   Eye,
   EyeOff,
   LogOut,
+  Pencil,
   Printer,
   Shield,
   Trash2,
@@ -91,7 +92,6 @@ const statusLabels: Record<ReservationStatus, string> = {
   pending: 'Pendiente',
   confirmed: 'Confirmada',
   cancelled: 'Cancelada',
-  completed: 'Completada',
 }
 
 function scrollToFirstAdminError() {
@@ -710,6 +710,36 @@ function ReservationsModule({
   const [form, setForm] = useState<ReservationForm>(emptyReservationForm)
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<ReservationFormErrors>({})
+  const [editingReservationId, setEditingReservationId] = useState<number | null>(
+    null
+  )
+  const isEditing = editingReservationId !== null
+
+  function startEdit(reservation: Reservation) {
+    setEditingReservationId(reservation.id)
+    setForm({
+      customerName: reservation.customer_name,
+      customerPhone: normalizePhone(reservation.customer_phone),
+      eventName: reservation.event_name,
+      reservationDate: String(reservation.reservation_date || '').slice(0, 10),
+      reservationTime: reservation.reservation_time,
+      tableType: reservation.table_type,
+      peopleCount: String(reservation.people_count),
+      reservationCount: String(reservation.reservation_count || 1),
+      notes: reservation.notes || '',
+      rpUserId: reservation.rp_user_id ? String(reservation.rp_user_id) : '',
+    })
+    setFieldErrors({})
+    setError('')
+    scrollToFirstAdminError()
+  }
+
+  function cancelEdit() {
+    setEditingReservationId(null)
+    setForm(emptyReservationForm)
+    setFieldErrors({})
+    setError('')
+  }
 
   function updateField(name: keyof ReservationForm, value: string) {
     const nextValue = name === 'customerPhone' ? normalizePhone(value) : value
@@ -736,6 +766,7 @@ function ReservationsModule({
     } else if (
       reservations.some(
         (reservation) =>
+          reservation.id !== editingReservationId &&
           reservation.status !== 'cancelled' &&
           reservation.customer_name.trim().toLowerCase() ===
             form.customerName.trim().toLowerCase()
@@ -750,7 +781,9 @@ function ReservationsModule({
 
     const dateError = getReservationDateError(form.reservationDate)
     if (dateError) {
-      nextErrors.reservationDate = dateError
+      if (!(isEditing && dateError === 'La fecha no puede ser anterior a hoy.')) {
+        nextErrors.reservationDate = dateError
+      }
     }
 
     if (!peopleOptions.includes(form.peopleCount)) {
@@ -772,7 +805,7 @@ function ReservationsModule({
     }
 
     try {
-      await api.createReservation(token, {
+      const payload = {
         customerName: form.customerName,
         customerPhone: form.customerPhone,
         eventName: form.eventName,
@@ -780,11 +813,18 @@ function ReservationsModule({
         reservationTime: form.reservationTime,
         tableType: form.tableType,
         peopleCount: Number(form.peopleCount),
-        reservationCount: 1,
+        reservationCount: Number(form.reservationCount || 1),
         notes: form.notes,
         rpUserId: form.rpUserId ? Number(form.rpUserId) : undefined,
-      })
-      setForm(emptyReservationForm)
+      }
+
+      if (isEditing && editingReservationId) {
+        await api.updateReservation(token, editingReservationId, payload)
+      } else {
+        await api.createReservation(token, payload)
+      }
+
+      cancelEdit()
       onSaved()
     } catch (apiError) {
       if (apiError instanceof ApiError && apiError.details) {
@@ -810,7 +850,7 @@ function ReservationsModule({
         className="rounded-[24px] border border-white/10 bg-zinc-950/82 p-5 shadow-[0_0_28px_rgba(0,0,0,0.62)] md:p-6"
       >
         <h2 className="text-2xl font-black uppercase text-pink-300">
-          Nueva reservacion
+          {isEditing ? 'Editar reservacion' : 'Nueva reservacion'}
         </h2>
         <div className="mt-5 grid gap-4">
           <Input
@@ -848,7 +888,7 @@ function ReservationsModule({
             <Input
               label="Fecha"
               type="date"
-              min={minReservationDate}
+              min={isEditing ? undefined : minReservationDate}
               value={form.reservationDate}
               onChange={(value) => updateField('reservationDate', value)}
               error={fieldErrors.reservationDate}
@@ -948,14 +988,24 @@ function ReservationsModule({
           type="submit"
           className="mt-6 w-full rounded-xl border border-pink-500 bg-black/70 px-6 py-4 font-black uppercase tracking-wide text-pink-200 shadow-[0_0_18px_rgba(236,72,153,0.35)]"
         >
-          Guardar reservacion
+          {isEditing ? 'Guardar cambios' : 'Guardar reservacion'}
         </button>
+        {isEditing && (
+          <button
+            type="button"
+            onClick={cancelEdit}
+            className="mt-3 w-full rounded-xl border border-white/10 bg-white/5 px-6 py-3 font-black uppercase tracking-wide text-white/65 transition hover:border-pink-500/55 hover:text-white"
+          >
+            Cancelar edicion
+          </button>
+        )}
       </form>
 
       <ReservationList
         token={token}
         isAdmin={isAdmin}
         reservations={reservations}
+        onEdit={startEdit}
         onChanged={onSaved}
       />
     </div>
@@ -966,15 +1016,18 @@ function ReservationList({
   token,
   isAdmin,
   reservations,
+  onEdit,
   onChanged,
 }: {
   token: string
   isAdmin: boolean
   reservations: Reservation[]
+  onEdit: (reservation: Reservation) => void
   onChanged: () => void
 }) {
   const [updatingId, setUpdatingId] = useState<number | null>(null)
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [isExpanded, setIsExpanded] = useState(false)
   const visibleReservations = isExpanded ? reservations : reservations.slice(0, 4)
 
@@ -1000,6 +1053,21 @@ function ReservationList({
     }
   }
 
+  async function deleteAllReservations() {
+    if (!window.confirm('Borrar TODAS las reservaciones del evento?')) return
+    if (!window.confirm('Esta accion no se puede deshacer. Confirmas borrar todo?')) {
+      return
+    }
+
+    setIsDeletingAll(true)
+    try {
+      await api.deleteAllReservations(token)
+      onChanged()
+    } finally {
+      setIsDeletingAll(false)
+    }
+  }
+
   return (
     <div className="rounded-[24px] border border-white/10 bg-zinc-950/82 p-5 shadow-[0_0_28px_rgba(0,0,0,0.62)] md:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1012,16 +1080,29 @@ function ReservationList({
           </p>
         </div>
 
-        {reservations.length > 4 && (
-          <button
-            type="button"
-            onClick={() => setIsExpanded((current) => !current)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black uppercase tracking-wide text-pink-200 transition hover:border-pink-500/60 hover:bg-pink-500/10"
-          >
-            {isExpanded ? 'Contraer' : 'Ver todas'}
-            {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-          </button>
-        )}
+        <div className="flex flex-col gap-2 sm:flex-row">
+          {isAdmin && reservations.length > 0 && (
+            <button
+              type="button"
+              disabled={isDeletingAll}
+              onClick={deleteAllReservations}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-400/40 bg-red-500/10 px-4 py-3 text-sm font-black uppercase tracking-wide text-red-100 transition hover:border-red-300 hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-55"
+            >
+              <Trash2 size={18} />
+              Borrar todas
+            </button>
+          )}
+          {reservations.length > 4 && (
+            <button
+              type="button"
+              onClick={() => setIsExpanded((current) => !current)}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black uppercase tracking-wide text-pink-200 transition hover:border-pink-500/60 hover:bg-pink-500/10"
+            >
+              {isExpanded ? 'Contraer' : 'Ver todas'}
+              {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </button>
+          )}
+        </div>
       </div>
       <div className="mt-5 grid gap-4">
         {visibleReservations.map((reservation) => (
@@ -1062,6 +1143,15 @@ function ReservationList({
                     </option>
                   ))}
                 </select>
+
+                <button
+                  type="button"
+                  onClick={() => onEdit(reservation)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-white/75 transition hover:border-pink-500/60 hover:bg-pink-500/10 hover:text-white"
+                >
+                  <Pencil size={16} />
+                  Editar
+                </button>
 
                 {isAdmin && (
                   <button

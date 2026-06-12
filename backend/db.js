@@ -69,7 +69,7 @@ export async function initializeDatabase() {
       people_count INTEGER NOT NULL CHECK (people_count > 0 AND people_count <= 100),
       reservation_count INTEGER NOT NULL DEFAULT 1 CHECK (reservation_count > 0 AND reservation_count <= 100),
       notes TEXT,
-      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled', 'completed')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -86,6 +86,17 @@ export async function initializeDatabase() {
     CREATE INDEX IF NOT EXISTS idx_reservations_created_by ON reservations(created_by);
     CREATE INDEX IF NOT EXISTS idx_reservations_rp_user_id ON reservations(rp_user_id);
     CREATE INDEX IF NOT EXISTS idx_reservations_created_at ON reservations(created_at);
+
+    UPDATE reservations
+      SET status = 'confirmed', updated_at = NOW()
+      WHERE status = 'completed';
+
+    ALTER TABLE reservations
+      DROP CONSTRAINT IF EXISTS reservations_status_check;
+
+    ALTER TABLE reservations
+      ADD CONSTRAINT reservations_status_check
+      CHECK (status IN ('pending', 'confirmed', 'cancelled'));
 
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT;
     ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;

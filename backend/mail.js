@@ -65,7 +65,16 @@ async function sendBrevoEmail({ to, name, subject, htmlContent }) {
 
   if (!response.ok) {
     const text = await response.text().catch(() => '')
-    throw new Error(`Brevo error ${response.status}: ${text || response.statusText}`)
+    let detail = text || response.statusText
+
+    try {
+      const parsed = JSON.parse(text)
+      detail = parsed.message || parsed.error || detail
+    } catch {
+      // Brevo sometimes returns plain text.
+    }
+
+    throw new Error(`Brevo rechazo el correo (${response.status}): ${detail}`)
   }
 }
 

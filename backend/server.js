@@ -20,6 +20,7 @@ const allowedPeopleCounts = new Set([2, 3, 4, 5, 7, 10])
 const allowedReservationTimes = new Set(['21:00', '22:00', '23:00'])
 const allowedTableTypes = new Set(['Acceso general', 'Mesa estandar', 'Mesa VIP'])
 const allowedEvents = new Set(['Evento privado'])
+const allowedReservationStatuses = new Set(['pending', 'confirmed', 'cancelled'])
 const mimeTypes = {
   '.css': 'text/css; charset=utf-8',
   '.gif': 'image/gif',
@@ -183,6 +184,12 @@ function toLocalDateInput(date = new Date()) {
   return `${year}-${month}-${day}`
 }
 
+function toStoredDateInput(value) {
+  if (!value) return ''
+  if (typeof value === 'string') return value.slice(0, 10)
+  return toLocalDateInput(new Date(value))
+}
+
 function parseDateInput(value) {
   const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!match) return null
@@ -204,12 +211,12 @@ function parseDateInput(value) {
   return date
 }
 
-function validateReservationDate(value) {
+function validateReservationDate(value, { allowPast = false } = {}) {
   const date = parseDateInput(value)
   if (!date) return 'Fecha requerida.'
 
   const today = parseDateInput(toLocalDateInput())
-  if (today && date < today) return 'La fecha no puede ser anterior a hoy.'
+  if (!allowPast && today && date < today) return 'La fecha no puede ser anterior a hoy.'
 
   const day = date.getDay()
   if (![5, 6, 0].includes(day)) {
@@ -386,7 +393,7 @@ async function handleSeedDemoData(response, currentUser) {
       table: 'Acceso general',
       people: 3,
       credits: 1,
-      status: 'completed',
+      status: 'confirmed',
     },
     {
       rpUserId: rpIds.sofia,
@@ -527,11 +534,20 @@ async function handleRequestPasswordRecovery(response, body) {
     `[backend] Codigo de recuperacion admin para ${user.email}: ${resetCode}`
   )
 
-  await sendPasswordRecoveryEmail({
-    to: user.email,
-    name: user.display_name,
-    code: resetCode,
-  })
+  try {
+    await sendPasswordRecoveryEmail({
+      to: user.email,
+      name: user.display_name,
+      code: resetCode,
+    })
+  } catch (error) {
+    const message = error?.message || 'No se pudo enviar el codigo por correo.'
+    console.error(
+      '[backend] Error enviando recuperacion:',
+      message
+    )
+    return sendJson(response, 502, { error: message })
+  }
 
   ok(response, {
     success: true,
@@ -716,12 +732,13 @@ async function handleRequestUserVerificationCode(response, body, currentUser) {
       role,
     })
   } catch (error) {
+    const message = error?.message || 'No se pudo enviar el codigo por correo.'
     console.error(
       '[backend] Error enviando codigo de alta:',
-      error?.message || error
+      message
     )
     return sendJson(response, 502, {
-      error: 'No se pudo enviar el codigo por correo.',
+      error: message,
     })
   }
 
@@ -894,7 +911,7 @@ async function handleDeleteUser(response, id, currentUser) {
   ok(response, { success: true })
 }
 
-function validateReservation(body) {
+function validateReservation(body, options = {}) {
   const reservation = {
     customerName: cleanText(body.customerName),
     customerPhone: cleanText(body.customerPhone),
@@ -915,7 +932,9 @@ function validateReservation(body) {
   if (!/^\d{10}$/.test(reservation.customerPhone.replace(/\D/g, ''))) {
     errors.customerPhone = 'El telefono debe tener exactamente 10 digitos.'
   }
-  const dateError = validateReservationDate(reservation.reservationDate)
+  const dateError = validateReservationDate(reservation.reservationDate, {
+    allowPast: Boolean(options.allowPastDate),
+  })
   if (dateError) errors.reservationDate = dateError
   if (!allowedEvents.has(reservation.eventName)) {
     errors.eventName = 'Evento invalido.'
@@ -932,7 +951,7 @@ function validateReservation(body) {
   if (reservation.reservationCount > 100) {
     errors.reservationCount = 'Maximo 100 reservaciones por captura.'
   }
-  if (!['pending', 'confirmed', 'cancelled', 'completed'].includes(reservation.status)) {
+  if (!allowedReservationStatuses.has(reservation.status)) {
     errors.status = 'Estado invalido.'
   }
 
@@ -1037,24 +1056,141 @@ async function handleCreatePublicReservation(response, body) {
 }
 
 async function handleUpdateReservation(response, id, body, currentUser) {
-  const allowed = ['pending', 'confirmed', 'cancelled', 'completed']
-  const status = cleanText(body.status)
+  const existingResult = await query(
+    `SELECT *
+     FROM reservations
+     WHERE id = $1
+       AND ($2::text = 'admin' OR created_by = $3 OR rp_user_id = $3)
+     LIMIT 1`,
+    [id, currentUser.role, currentUser.id]
+  )
 
-  if (!allowed.includes(status)) {
-    return badRequest(response, 'Estado invalido.')
+  if (existingResult.rowCount === 0) return forbidden(response)
+
+  const existing = existingResult.rows[0]
+  const onlyStatus =
+    Object.keys(body).length === 1 &&
+    Object.prototype.hasOwnProperty.call(body, 'status')
+
+  if (onlyStatus) {
+    const status = cleanText(body.status)
+
+    if (!allowedReservationStatuses.has(status)) {
+      return badRequest(response, 'Estado invalido.')
+    }
+
+    const result = await query(
+      `UPDATE reservations
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [status, id]
+    )
+
+    return ok(response, { reservation: result.rows[0] })
+  }
+
+  const { reservation, errors } = validateReservation(
+    {
+      customerName: body.customerName ?? existing.customer_name,
+      customerPhone: body.customerPhone ?? existing.customer_phone,
+      customerEmail: body.customerEmail ?? existing.customer_email ?? '',
+      eventName: body.eventName ?? existing.event_name,
+      reservationDate:
+        body.reservationDate ?? toStoredDateInput(existing.reservation_date),
+      reservationTime: body.reservationTime ?? existing.reservation_time,
+      tableType: body.tableType ?? existing.table_type,
+      peopleCount: body.peopleCount ?? existing.people_count,
+      reservationCount: body.reservationCount ?? existing.reservation_count,
+      notes: body.notes ?? existing.notes ?? '',
+      status: body.status ?? existing.status,
+    },
+    { allowPastDate: true }
+  )
+
+  if (Object.keys(errors).length > 0) {
+    return badRequest(response, 'Revisa los datos de la reservacion.', errors)
+  }
+
+  const duplicateResult = await query(
+    `SELECT id
+     FROM reservations
+     WHERE id <> $1
+       AND LOWER(customer_name) = LOWER($2)
+       AND status <> 'cancelled'
+     LIMIT 1`,
+    [id, reservation.customerName]
+  )
+
+  if (duplicateResult.rowCount > 0 && reservation.status !== 'cancelled') {
+    return badRequest(response, 'Ese nombre ya tiene una reservacion registrada.', {
+      customerName: 'Ese nombre ya tiene una reservacion registrada.',
+    })
+  }
+
+  let rpUserId = existing.rp_user_id
+
+  if (currentUser.role === 'admin') {
+    if (Object.prototype.hasOwnProperty.call(body, 'rpUserId')) {
+      if (body.rpUserId) {
+        const rpResult = await query(
+          `SELECT id FROM users WHERE id = $1 AND role = 'rp' AND active = TRUE`,
+          [body.rpUserId]
+        )
+
+        if (rpResult.rowCount === 0) {
+          return badRequest(response, 'El RP seleccionado no existe o esta inactivo.')
+        }
+
+        rpUserId = Number(body.rpUserId)
+      } else {
+        rpUserId = null
+      }
+    }
+  } else if (existing.rp_user_id === null) {
+    rpUserId = currentUser.id
   }
 
   const result = await query(
     `UPDATE reservations
-     SET status = $1, updated_at = NOW()
-     WHERE id = $2
-       AND ($3::text = 'admin' OR created_by = $4 OR rp_user_id = $4)
+     SET rp_user_id = $1,
+         customer_name = $2,
+         customer_phone = $3,
+         customer_email = $4,
+         event_name = $5,
+         reservation_date = $6,
+         reservation_time = $7,
+         table_type = $8,
+         people_count = $9,
+         reservation_count = $10,
+         notes = $11,
+         status = $12,
+         updated_at = NOW()
+     WHERE id = $13
      RETURNING *`,
-    [status, id, currentUser.role, currentUser.id]
+    [
+      rpUserId,
+      reservation.customerName,
+      reservation.customerPhone.replace(/\D/g, ''),
+      reservation.customerEmail || existing.customer_email || null,
+      reservation.eventName,
+      reservation.reservationDate,
+      reservation.reservationTime,
+      reservation.tableType,
+      reservation.peopleCount,
+      reservation.reservationCount,
+      reservation.notes || null,
+      reservation.status,
+      id,
+    ]
   )
 
-  if (result.rowCount === 0) return forbidden(response)
   ok(response, { reservation: result.rows[0] })
+}
+
+async function handleDeleteAllReservations(response) {
+  const result = await query('DELETE FROM reservations RETURNING id')
+  ok(response, { success: true, deleted: result.rowCount })
 }
 
 async function handleDeleteReservation(response, id) {
@@ -1204,6 +1340,11 @@ async function handleRequest(request, response) {
 
   if (pathname === '/api/reservations' && method === 'POST') {
     return handleCreateReservation(response, body, currentUser)
+  }
+
+  if (pathname === '/api/reservations' && method === 'DELETE') {
+    if (!requireRole(currentUser, ['admin'])) return forbidden(response)
+    return handleDeleteAllReservations(response)
   }
 
   const reservationMatch = pathname.match(/^\/api\/reservations\/(\d+)$/)
