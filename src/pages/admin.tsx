@@ -6,7 +6,6 @@ import {
   ChevronUp,
   Eye,
   EyeOff,
-  FileText,
   LogOut,
   Printer,
   Shield,
@@ -29,14 +28,14 @@ import {
 } from '../lib/reservationOptions'
 import type {
   AuthUser,
-  ContentSection,
+  RecoveryAdmin,
   Reservation,
   ReservationStatus,
   RpReport,
   UserRole,
 } from '../lib/api'
 
-type AdminTab = 'dashboard' | 'reservations' | 'rps' | 'users' | 'content'
+type AdminTab = 'dashboard' | 'reservations' | 'rps' | 'users'
 
 type ReservationForm = {
   customerName: string
@@ -58,7 +57,9 @@ type UserForm = {
   username: string
   displayName: string
   role: UserRole
+  email: string
   password: string
+  verificationCode: string
 }
 
 const storageKey = 'blackout_admin_session'
@@ -81,7 +82,9 @@ const emptyUserForm: UserForm = {
   username: '',
   displayName: '',
   role: 'rp',
+  email: '',
   password: '',
+  verificationCode: '',
 }
 
 const statusLabels: Record<ReservationStatus, string> = {
@@ -99,42 +102,8 @@ function scrollToFirstAdminError() {
   }, 50)
 }
 
-type ContentField = {
-  key: string
-  label: string
-  helper?: string
-  type?: 'text' | 'textarea'
-}
-
-const contentFieldConfig: Record<string, ContentField[]> = {
-  home: [
-    { key: 'heroEyebrow', label: 'Texto pequeño del inicio' },
-    { key: 'heroTitle', label: 'Titulo principal' },
-    { key: 'heroSubtitle', label: 'Frase debajo del titulo' },
-    { key: 'reservationTitle', label: 'Titulo del bloque de reserva' },
-  ],
-  events: [
-    { key: 'title', label: 'Titulo de eventos' },
-    {
-      key: 'subtitle',
-      label: 'Descripcion de eventos',
-      type: 'textarea',
-    },
-  ],
-  gallery: [
-    { key: 'title', label: 'Titulo de galeria' },
-    {
-      key: 'subtitle',
-      label: 'Descripcion de galeria',
-      type: 'textarea',
-    },
-  ],
-  info: [
-    { key: 'location', label: 'Ubicacion' },
-    { key: 'hours', label: 'Horarios' },
-    { key: 'contactEmail', label: 'Correo de contacto' },
-    { key: 'instagram', label: 'Instagram' },
-  ],
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 }
 
 function Admin() {
@@ -211,13 +180,46 @@ function AdminLogin({
   const [error, setError] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [showRecovery, setShowRecovery] = useState(false)
-  const [recoveryEmail, setRecoveryEmail] = useState('')
+  const [recoveryAdmins, setRecoveryAdmins] = useState<RecoveryAdmin[]>([])
+  const [recoveryAdminId, setRecoveryAdminId] = useState('')
   const [recoveryCode, setRecoveryCode] = useState('')
   const [recoveryPassword, setRecoveryPassword] = useState('')
   const [showRecoveryPassword, setShowRecoveryPassword] = useState(false)
   const [recoveryMessage, setRecoveryMessage] = useState('')
   const [recoveryError, setRecoveryError] = useState('')
   const [isRecovering, setIsRecovering] = useState(false)
+  const [isLoadingRecoveryAdmins, setIsLoadingRecoveryAdmins] = useState(false)
+
+  useEffect(() => {
+    if (!showRecovery) return
+
+    let isActive = true
+    setIsLoadingRecoveryAdmins(true)
+    setRecoveryError('')
+
+    api
+      .recoveryAdmins()
+      .then((result) => {
+        if (!isActive) return
+        setRecoveryAdmins(result.admins)
+        setRecoveryAdminId((current) => current || String(result.admins[0]?.id || ''))
+      })
+      .catch((apiError) => {
+        if (!isActive) return
+        setRecoveryError(
+          apiError instanceof Error
+            ? apiError.message
+            : 'No se pudieron cargar los administradores.'
+        )
+      })
+      .finally(() => {
+        if (isActive) setIsLoadingRecoveryAdmins(false)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [showRecovery])
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -238,10 +240,18 @@ function AdminLogin({
   async function requestRecovery() {
     setRecoveryError('')
     setRecoveryMessage('')
+
+    const adminId = Number(recoveryAdminId)
+    if (!adminId) {
+      setRecoveryError('Selecciona un administrador.')
+      scrollToFirstAdminError()
+      return
+    }
+
     setIsRecovering(true)
 
     try {
-      const result = await api.requestAdminPasswordRecovery(recoveryEmail)
+      const result = await api.requestAdminPasswordRecovery(adminId)
       setRecoveryMessage(
         result.resetCode
           ? `Correo verificado. Codigo temporal local: ${result.resetCode}`
@@ -262,11 +272,19 @@ function AdminLogin({
   async function confirmRecovery() {
     setRecoveryError('')
     setRecoveryMessage('')
+
+    const adminId = Number(recoveryAdminId)
+    if (!adminId) {
+      setRecoveryError('Selecciona un administrador.')
+      scrollToFirstAdminError()
+      return
+    }
+
     setIsRecovering(true)
 
     try {
       const result = await api.confirmAdminPasswordRecovery(
-        recoveryEmail,
+        adminId,
         recoveryCode,
         recoveryPassword
       )
@@ -368,16 +386,37 @@ function AdminLogin({
                 Solo administrador con correo verificado
               </p>
               <div className="mt-4 grid gap-3">
-                <Input
-                  label="Correo verificado"
-                  type="email"
-                  value={recoveryEmail}
-                  onChange={setRecoveryEmail}
-                  autoComplete="email"
-                />
+                <label data-error={recoveryError ? 'true' : undefined}>
+                  <span className="mb-2 block text-sm uppercase tracking-wide text-white/55">
+                    Administrador
+                  </span>
+                  <select
+                    value={recoveryAdminId}
+                    disabled={isLoadingRecoveryAdmins || recoveryAdmins.length === 0}
+                    onChange={(event) => setRecoveryAdminId(event.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3 text-white outline-none focus:border-pink-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {recoveryAdmins.length === 0 && (
+                      <option value="">
+                        {isLoadingRecoveryAdmins
+                          ? 'Cargando administradores...'
+                          : 'Sin administradores disponibles'}
+                      </option>
+                    )}
+                    {recoveryAdmins.map((admin) => (
+                      <option key={admin.id} value={admin.id}>
+                        {admin.displayName} (@{admin.username}) - {admin.emailLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   type="button"
-                  disabled={isRecovering}
+                  disabled={
+                    isRecovering ||
+                    isLoadingRecoveryAdmins ||
+                    recoveryAdmins.length === 0
+                  }
                   onClick={requestRecovery}
                   className="rounded-xl border border-cyan-400/45 bg-cyan-500/10 px-4 py-3 text-sm font-black uppercase tracking-wide text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-55"
                 >
@@ -447,7 +486,6 @@ function AdminPanel({
   const [users, setUsers] = useState<AuthUser[]>([])
   const [rps, setRps] = useState<AuthUser[]>([])
   const [report, setReport] = useState<RpReport[]>([])
-  const [sections, setSections] = useState<ContentSection[]>([])
   const [message, setMessage] = useState('')
 
   const isAdmin = user.role === 'admin'
@@ -464,7 +502,6 @@ function AdminPanel({
         },
         { id: 'rps', label: 'RPs', icon: Users, adminOnly: true },
         { id: 'users', label: 'Usuarios', icon: UserPlus, adminOnly: true },
-        { id: 'content', label: 'Contenido', icon: FileText, adminOnly: true },
       ].filter((tab) => isAdmin || !tab.adminOnly) as {
         id: AdminTab
         label: string
@@ -479,18 +516,15 @@ function AdminPanel({
     setReservations(reservationResult.reservations)
 
     if (isAdmin) {
-      const [usersResult, rpsResult, reportResult, contentResult] =
-        await Promise.all([
-          api.users(token),
-          api.rps(token),
-          api.rpReport(token),
-          api.content(token),
-        ])
+      const [usersResult, rpsResult, reportResult] = await Promise.all([
+        api.users(token),
+        api.rps(token),
+        api.rpReport(token),
+      ])
 
       setUsers(usersResult.users)
       setRps(rpsResult.rps)
       setReport(reportResult.report)
-      setSections(contentResult.sections)
     }
   }
 
@@ -597,16 +631,6 @@ function AdminPanel({
                   currentUserId={user.id}
                   onSaved={() => {
                     setMessage('Usuario guardado.')
-                    refreshData()
-                  }}
-                />
-              )}
-              {activeTab === 'content' && isAdmin && (
-                <ContentModule
-                  token={token}
-                  sections={sections}
-                  onSaved={() => {
-                    setMessage('Contenido guardado.')
                     refreshData()
                   }}
                 />
@@ -1405,21 +1429,23 @@ function UsersModule({
   const [error, setError] = useState('')
   const [fieldErrors, setFieldErrors] = useState<UserFormErrors>({})
   const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [isSendingCode, setIsSendingCode] = useState(false)
+  const [codeMessage, setCodeMessage] = useState('')
 
   function updateField(name: keyof UserForm, value: string) {
     setForm((current) => ({
       ...current,
-      [name]: name === 'username' ? value.trim().toLowerCase() : value,
+      [name]:
+        name === 'username' || name === 'email'
+          ? value.trim().toLowerCase()
+          : value,
     }))
     setFieldErrors((current) => ({ ...current, [name]: '' }))
     setError('')
+    setCodeMessage('')
   }
 
-  async function submit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setError('')
-    setFieldErrors({})
-
+  function validateUserForm(options: { includePassword: boolean; includeCode: boolean }) {
     const nextErrors: UserFormErrors = {}
 
     if (form.username.trim().length < 3) {
@@ -1447,13 +1473,86 @@ function UsersModule({
       nextErrors.displayName = 'Ya existe un RP con ese nombre.'
     }
 
+    if (!isValidEmail(form.email)) {
+      nextErrors.email = 'Escribe un correo valido.'
+    } else if (
+      users.some((item) => item.email?.toLowerCase() === form.email.trim().toLowerCase())
+    ) {
+      nextErrors.email = 'Ese correo ya esta en uso.'
+    }
+
     if (!['admin', 'rp'].includes(form.role)) {
       nextErrors.role = 'Selecciona un rol valido.'
     }
 
-    if (form.password.length < 8) {
+    if (options.includePassword && form.password.length < 8) {
       nextErrors.password = 'El password debe tener minimo 8 caracteres.'
     }
+
+    if (options.includeCode && !/^\d{6}$/.test(form.verificationCode.trim())) {
+      nextErrors.verificationCode = 'Escribe el codigo de 6 digitos.'
+    }
+
+    return nextErrors
+  }
+
+  async function requestVerificationCode() {
+    setError('')
+    setCodeMessage('')
+    setFieldErrors({})
+
+    const nextErrors = validateUserForm({
+      includePassword: false,
+      includeCode: false,
+    })
+
+    if (Object.values(nextErrors).some(Boolean)) {
+      setFieldErrors(nextErrors)
+      scrollToFirstAdminError()
+      return
+    }
+
+    setIsSendingCode(true)
+
+    try {
+      const result = await api.requestUserVerificationCode(token, {
+        username: form.username,
+        displayName: form.displayName,
+        role: form.role,
+        email: form.email,
+      })
+      setCodeMessage(
+        result.verificationCode
+          ? `${result.message} Codigo temporal local: ${result.verificationCode}`
+          : result.message
+      )
+    } catch (apiError) {
+      if (apiError instanceof ApiError && apiError.details) {
+        setFieldErrors({
+          username: apiError.details.username,
+          displayName: apiError.details.displayName,
+          role: apiError.details.role,
+          email: apiError.details.email,
+        })
+        scrollToFirstAdminError()
+      }
+      setError(
+        apiError instanceof Error ? apiError.message : 'No se pudo enviar el codigo.'
+      )
+    } finally {
+      setIsSendingCode(false)
+    }
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setError('')
+    setFieldErrors({})
+
+    const nextErrors = validateUserForm({
+      includePassword: true,
+      includeCode: true,
+    })
 
     if (Object.values(nextErrors).some(Boolean)) {
       setFieldErrors(nextErrors)
@@ -1464,6 +1563,7 @@ function UsersModule({
     try {
       await api.createUser(token, form)
       setForm(emptyUserForm)
+      setCodeMessage('')
       onSaved()
     } catch (apiError) {
       if (apiError instanceof ApiError && apiError.details) {
@@ -1471,7 +1571,9 @@ function UsersModule({
           username: apiError.details.username,
           displayName: apiError.details.displayName,
           role: apiError.details.role,
+          email: apiError.details.email,
           password: apiError.details.password,
+          verificationCode: apiError.details.verificationCode,
         })
         scrollToFirstAdminError()
       }
@@ -1519,6 +1621,14 @@ function UsersModule({
             error={fieldErrors.displayName}
             onChange={(value) => updateField('displayName', value)}
           />
+          <Input
+            label="Correo electronico"
+            type="email"
+            value={form.email}
+            error={fieldErrors.email}
+            onChange={(value) => updateField('email', value)}
+            autoComplete="email"
+          />
           <label data-error={fieldErrors.role ? 'true' : undefined}>
             <span className="mb-2 block text-sm uppercase tracking-wide text-white/55">
               Rol
@@ -1539,12 +1649,33 @@ function UsersModule({
             </select>
             <FieldError message={fieldErrors.role} />
           </label>
+          <button
+            type="button"
+            disabled={isSendingCode}
+            onClick={requestVerificationCode}
+            className="rounded-xl border border-cyan-400/45 bg-cyan-500/10 px-4 py-3 text-sm font-black uppercase tracking-wide text-cyan-100 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-55"
+          >
+            {isSendingCode ? 'Enviando codigo...' : 'Enviar codigo al correo'}
+          </button>
+          {codeMessage && (
+            <div className="rounded-xl border border-emerald-400/35 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-100">
+              {codeMessage}
+            </div>
+          )}
           <Input
             label="Password"
             type="password"
             value={form.password}
             error={fieldErrors.password}
             onChange={(value) => updateField('password', value)}
+          />
+          <Input
+            label="Codigo de validacion"
+            value={form.verificationCode}
+            error={fieldErrors.verificationCode}
+            onChange={(value) => updateField('verificationCode', value)}
+            inputMode="numeric"
+            maxLength={6}
           />
         </div>
         <FieldError message={error} />
@@ -1574,6 +1705,9 @@ function UsersModule({
                   @{item.username} · {item.role.toUpperCase()} ·{' '}
                   {item.active ? 'Activo' : 'Inactivo'}
                 </p>
+                {item.email && (
+                  <p className="mt-1 text-xs text-white/42">{item.email}</p>
+                )}
               </div>
 
               {item.id !== currentUserId && (
@@ -1591,173 +1725,6 @@ function UsersModule({
           ))}
         </div>
       </div>
-    </div>
-  )
-}
-
-function contentValueToString(value: unknown) {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return JSON.stringify(value)
-}
-
-function buildContentForm(
-  section: ContentSection | undefined,
-  fields: ContentField[]
-) {
-  return fields.reduce<Record<string, string>>((nextForm, field) => {
-    nextForm[field.key] = contentValueToString(section?.payload?.[field.key])
-    return nextForm
-  }, {})
-}
-
-function ContentModule({
-  token,
-  sections,
-  onSaved,
-}: {
-  token: string
-  sections: ContentSection[]
-  onSaved: () => void
-}) {
-  const [selectedKey, setSelectedKey] = useState(sections[0]?.section_key || 'home')
-  const selected = sections.find((section) => section.section_key === selectedKey)
-  const fields = contentFieldConfig[selectedKey] || []
-  const [title, setTitle] = useState(selected?.title || 'Inicio')
-  const [formPayload, setFormPayload] = useState<Record<string, string>>(
-    buildContentForm(selected, fields)
-  )
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (sections.length > 0 && !sections.some((section) => section.section_key === selectedKey)) {
-      setSelectedKey(sections[0].section_key)
-    }
-  }, [sections, selectedKey])
-
-  useEffect(() => {
-    const next = sections.find((section) => section.section_key === selectedKey)
-    if (!next) return
-    const nextFields = contentFieldConfig[next.section_key] || []
-    setTitle(next.title)
-    setFormPayload(buildContentForm(next, nextFields))
-    setError('')
-  }, [selectedKey, sections])
-
-  function updatePayloadField(key: string, value: string) {
-    setFormPayload((current) => ({ ...current, [key]: value }))
-  }
-
-  async function save() {
-    if (!selectedKey) {
-      setError('Selecciona una seccion para guardar.')
-      return
-    }
-
-    setError('')
-    try {
-      await api.saveContent(token, selectedKey, title.trim() || selectedKey, {
-        ...(selected?.payload || {}),
-        ...formPayload,
-      })
-      onSaved()
-    } catch (apiError) {
-      setError(
-        apiError instanceof Error
-          ? apiError.message
-          : 'No se pudo guardar el contenido.'
-      )
-    }
-  }
-
-  return (
-    <div className="rounded-[24px] border border-white/10 bg-zinc-950/82 p-5 md:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h2 className="text-2xl font-black uppercase text-pink-300">
-            Contenido editable
-          </h2>
-          <p className="mt-2 max-w-2xl text-white/55">
-            Cambia los textos principales de cada apartado con campos sencillos.
-          </p>
-        </div>
-        <div className="rounded-xl border border-pink-500/35 bg-pink-500/10 px-4 py-3 text-sm font-bold uppercase tracking-wide text-pink-100">
-          Sin JSON
-        </div>
-      </div>
-
-      <div className="mt-6 grid gap-4">
-        <label>
-          <span className="mb-2 block text-sm uppercase tracking-wide text-white/55">
-            Apartado
-          </span>
-          <select
-            value={selectedKey}
-            onChange={(event) => setSelectedKey(event.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-zinc-950 px-4 py-3 text-white outline-none focus:border-pink-500"
-          >
-            {sections.map((section) => (
-              <option key={section.section_key} value={section.section_key}>
-                {section.title}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <Input label="Nombre del apartado" value={title} onChange={setTitle} />
-
-        <div className="grid gap-4 md:grid-cols-2">
-          {fields.map((field) => (
-            <label
-              key={field.key}
-              className={field.type === 'textarea' ? 'md:col-span-2' : ''}
-            >
-              <span className="mb-2 block text-sm uppercase tracking-wide text-white/55">
-                {field.label}
-              </span>
-              {field.type === 'textarea' ? (
-                <textarea
-                  value={formPayload[field.key] || ''}
-                  onChange={(event) =>
-                    updatePayloadField(field.key, event.target.value)
-                  }
-                  rows={4}
-                  className="w-full resize-y rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-500 focus:bg-pink-500/10"
-                />
-              ) : (
-                <input
-                  value={formPayload[field.key] || ''}
-                  onChange={(event) =>
-                    updatePayloadField(field.key, event.target.value)
-                  }
-                  className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-pink-500 focus:bg-pink-500/10"
-                />
-              )}
-              {field.helper && (
-                <span className="mt-2 block text-xs text-white/42">
-                  {field.helper}
-                </span>
-              )}
-            </label>
-          ))}
-        </div>
-
-        {fields.length === 0 && (
-          <p className="rounded-xl border border-yellow-300/25 bg-yellow-300/10 px-4 py-3 text-sm text-yellow-100">
-            Este apartado no tiene campos configurados todavia.
-          </p>
-        )}
-      </div>
-
-      <FieldError message={error} />
-      <button
-        type="button"
-        onClick={save}
-        className="mt-6 w-full rounded-xl border border-pink-500 bg-black/70 px-6 py-4 font-black uppercase tracking-wide text-pink-200 shadow-[0_0_18px_rgba(236,72,153,0.35)] transition hover:-translate-y-1 hover:text-white md:w-auto"
-      >
-        Guardar contenido
-      </button>
     </div>
   )
 }

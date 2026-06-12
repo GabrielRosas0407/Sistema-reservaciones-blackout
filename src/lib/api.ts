@@ -6,6 +6,7 @@ export type AuthUser = {
   displayName: string
   role: UserRole
   active: boolean
+  email?: string | null
   createdAt?: string
 }
 
@@ -45,11 +46,11 @@ export type RpReport = {
   last_reservation_at: string | null
 }
 
-export type ContentSection = {
-  section_key: string
-  title: string
-  payload: Record<string, unknown>
-  updated_at: string
+export type RecoveryAdmin = {
+  id: number
+  username: string
+  displayName: string
+  emailLabel: string
 }
 
 export class ApiError extends Error {
@@ -94,20 +95,23 @@ export const api = {
       body: JSON.stringify({ username, password }),
     })
   },
-  requestAdminPasswordRecovery(email: string) {
+  recoveryAdmins() {
+    return apiRequest<{ admins: RecoveryAdmin[] }>('/auth/recovery/admins')
+  },
+  requestAdminPasswordRecovery(adminId: number) {
     return apiRequest<{ success: true; message: string; resetCode?: string }>(
       '/auth/recovery/request',
-      { method: 'POST', body: JSON.stringify({ email }) }
+      { method: 'POST', body: JSON.stringify({ adminId }) }
     )
   },
   confirmAdminPasswordRecovery(
-    email: string,
+    adminId: number,
     code: string,
     password: string
   ) {
     return apiRequest<{ success: true; message: string }>(
       '/auth/recovery/confirm',
-      { method: 'POST', body: JSON.stringify({ email, code, password }) }
+      { method: 'POST', body: JSON.stringify({ adminId, code, password }) }
     )
   },
   me(token: string) {
@@ -122,11 +126,32 @@ export const api = {
       username: string
       displayName: string
       role: UserRole
+      email: string
       password: string
+      verificationCode: string
     }
   ) {
     return apiRequest<{ user: AuthUser }>(
       '/users',
+      { method: 'POST', body: JSON.stringify(payload) },
+      token
+    )
+  },
+  requestUserVerificationCode(
+    token: string,
+    payload: {
+      username: string
+      displayName: string
+      role: UserRole
+      email: string
+    }
+  ) {
+    return apiRequest<{
+      success: true
+      message: string
+      verificationCode?: string
+    }>(
+      '/users/verification-code',
       { method: 'POST', body: JSON.stringify(payload) },
       token
     )
@@ -233,16 +258,6 @@ export const api = {
     }>(
       '/admin/demo-data',
       { method: 'POST', body: JSON.stringify({}) },
-      token
-    )
-  },
-  content(token: string) {
-    return apiRequest<{ sections: ContentSection[] }>('/content', {}, token)
-  },
-  saveContent(token: string, key: string, title: string, payload: object) {
-    return apiRequest<{ section: ContentSection }>(
-      `/admin/content/${key}`,
-      { method: 'PUT', body: JSON.stringify({ title, payload }) },
       token
     )
   },

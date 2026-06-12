@@ -96,6 +96,24 @@ export async function initializeDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
       ON users (LOWER(email))
       WHERE email IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS user_create_codes (
+      id SERIAL PRIMARY KEY,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      code_salt TEXT NOT NULL,
+      target_username TEXT NOT NULL,
+      target_role TEXT NOT NULL CHECK (target_role IN ('admin', 'rp')),
+      requested_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      expires_at TIMESTAMPTZ NOT NULL,
+      used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_create_codes_lookup
+      ON user_create_codes (LOWER(email), LOWER(target_username), target_role, expires_at DESC)
+      WHERE used_at IS NULL;
   `)
 
   await seedAdmin()

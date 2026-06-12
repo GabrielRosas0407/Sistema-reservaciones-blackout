@@ -86,6 +86,23 @@ export async function sendPasswordRecoveryEmail({ to, name, code }) {
   })
 }
 
+export async function sendUserVerificationEmail({ to, name, code, role }) {
+  await sendBrevoEmail({
+    to,
+    name,
+    subject: 'Codigo de validacion de acceso - Blackout',
+    htmlContent: `
+      <div style="font-family:Arial,sans-serif;max-width:560px;margin:auto;padding:22px;background:#08080c;color:#f8fafc;">
+        <h2 style="color:#f9a8d4;">Validacion de acceso</h2>
+        <p>Hola ${escapeHtml(name || to)}, usa este codigo para terminar de crear tu acceso ${escapeHtml(String(role || '').toUpperCase())}.</p>
+        ${codeBox(code)}
+        <p>Este codigo vence en <strong>10 minutos</strong>.</p>
+        <p style="color:#94a3b8;font-size:13px;">Si no esperabas este acceso, ignora este correo.</p>
+      </div>
+    `,
+  })
+}
+
 export async function sendReservationReceivedEmail({ to, name, reservation }) {
   await sendBrevoEmail({
     to,

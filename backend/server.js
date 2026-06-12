@@ -10,6 +10,7 @@ import {
   sendAdminReservationEmail,
   sendPasswordRecoveryEmail,
   sendReservationReceivedEmail,
+  sendUserVerificationEmail,
 } from './mail.js'
 
 const port = Number(process.env.PORT || 4000)
@@ -163,6 +164,12 @@ function isEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
 }
 
+function maskEmail(email) {
+  const [name = '', domain = ''] = String(email || '').split('@')
+  const visibleName = name.length <= 2 ? name : `${name.slice(0, 2)}***`
+  return domain ? `${visibleName}@${domain}` : email
+}
+
 function toPositiveInt(value, fallback = 1) {
   const number = Number(value)
   if (!Number.isInteger(number) || number < 1) return fallback
@@ -250,7 +257,17 @@ function publicUser(row) {
     displayName: row.display_name,
     role: row.role,
     active: row.active,
+    email: row.email || null,
     createdAt: row.created_at,
+  }
+}
+
+function publicRecoveryAdmin(row) {
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    emailLabel: maskEmail(row.email),
   }
 }
 
@@ -446,35 +463,50 @@ async function handleLogin(response, body) {
   })
 }
 
-async function findVerifiedAdminByEmail(email) {
+async function listRecoveryAdmins() {
+  const result = await query(
+    `SELECT id, username, display_name, email
+     FROM users
+     WHERE role = 'admin'
+       AND active = TRUE
+       AND email_verified = TRUE
+       AND email IS NOT NULL
+     ORDER BY display_name ASC`
+  )
+
+  return result.rows
+}
+
+async function findVerifiedAdminById(adminId) {
   const result = await query(
     `SELECT *
      FROM users
-     WHERE LOWER(email) = LOWER($1)
+     WHERE id = $1
        AND role = 'admin'
        AND active = TRUE
        AND email_verified = TRUE
+       AND email IS NOT NULL
      LIMIT 1`,
-    [email]
+    [adminId]
   )
 
   return result.rows[0] || null
 }
 
 async function handleRequestPasswordRecovery(response, body) {
-  const email = cleanEmail(body.email)
+  const adminId = Number(body.adminId)
 
-  if (!isEmail(email)) {
-    return badRequest(response, 'Escribe un correo valido.', {
-      email: 'Escribe un correo valido.',
+  if (!Number.isInteger(adminId) || adminId < 1) {
+    return badRequest(response, 'Selecciona un administrador.', {
+      adminId: 'Selecciona un administrador.',
     })
   }
 
-  const user = await findVerifiedAdminByEmail(email)
+  const user = await findVerifiedAdminById(adminId)
 
   if (!user) {
-    return badRequest(response, 'Ese correo no existe o no esta verificado.', {
-      email: 'Ese correo no existe o no esta verificado como administrador.',
+    return badRequest(response, 'Ese administrador no existe o no tiene correo verificado.', {
+      adminId: 'Ese administrador no existe o no tiene correo verificado.',
     })
   }
 
@@ -492,7 +524,7 @@ async function handleRequestPasswordRecovery(response, body) {
   )
 
   console.warn(
-    `[backend] Codigo de recuperacion admin para ${email}: ${resetCode}`
+    `[backend] Codigo de recuperacion admin para ${user.email}: ${resetCode}`
   )
 
   await sendPasswordRecoveryEmail({
@@ -509,12 +541,14 @@ async function handleRequestPasswordRecovery(response, body) {
 }
 
 async function handleConfirmPasswordRecovery(response, body) {
-  const email = cleanEmail(body.email)
+  const adminId = Number(body.adminId)
   const code = cleanText(body.code)
   const password = String(body.password ?? '')
   const errors = {}
 
-  if (!isEmail(email)) errors.email = 'Escribe un correo valido.'
+  if (!Number.isInteger(adminId) || adminId < 1) {
+    errors.adminId = 'Selecciona un administrador.'
+  }
   if (!/^\d{6}$/.test(code)) errors.code = 'El codigo debe tener 6 digitos.'
   if (password.length < 8) errors.password = 'Minimo 8 caracteres.'
 
@@ -522,7 +556,7 @@ async function handleConfirmPasswordRecovery(response, body) {
     return badRequest(response, 'Revisa los datos de recuperacion.', errors)
   }
 
-  const user = await findVerifiedAdminByEmail(email)
+  const user = await findVerifiedAdminById(adminId)
 
   if (
     !user ||
@@ -567,18 +601,54 @@ async function handleConfirmPasswordRecovery(response, body) {
   })
 }
 
-async function handleCreateUser(response, body, currentUser) {
+async function validateCreateUserInput(body, options = {}) {
   const username = cleanText(body.username).toLowerCase()
   const displayName = cleanText(body.displayName)
   const role = cleanText(body.role)
+  const email = cleanEmail(body.email)
   const password = String(body.password ?? '')
+  const verificationCode = cleanText(body.verificationCode)
 
   const errors = {}
 
   if (username.length < 3) errors.username = 'Minimo 3 caracteres.'
   if (displayName.length < 3) errors.displayName = 'Minimo 3 caracteres.'
   if (!['admin', 'rp'].includes(role)) errors.role = 'Rol invalido.'
-  if (password.length < 8) errors.password = 'Minimo 8 caracteres.'
+  if (!isEmail(email)) errors.email = 'Escribe un correo valido.'
+  if (options.requirePassword && password.length < 8) {
+    errors.password = 'Minimo 8 caracteres.'
+  }
+  if (options.requireCode && !/^\d{6}$/.test(verificationCode)) {
+    errors.verificationCode = 'El codigo debe tener 6 digitos.'
+  }
+
+  if (username.length >= 3) {
+    const duplicateUsername = await query(
+      `SELECT id
+       FROM users
+       WHERE LOWER(username) = LOWER($1)
+       LIMIT 1`,
+      [username]
+    )
+
+    if (duplicateUsername.rowCount > 0) {
+      errors.username = 'Ese usuario ya existe.'
+    }
+  }
+
+  if (isEmail(email)) {
+    const duplicateEmail = await query(
+      `SELECT id
+       FROM users
+       WHERE LOWER(email) = LOWER($1)
+       LIMIT 1`,
+      [email]
+    )
+
+    if (duplicateEmail.rowCount > 0) {
+      errors.email = 'Ese correo ya esta en uso.'
+    }
+  }
 
   if (role === 'rp' && displayName.length >= 3) {
     const duplicateRpName = await query(
@@ -596,8 +666,127 @@ async function handleCreateUser(response, body, currentUser) {
     }
   }
 
+  return {
+    username,
+    displayName,
+    role,
+    email,
+    password,
+    verificationCode,
+    errors,
+  }
+}
+
+async function handleRequestUserVerificationCode(response, body, currentUser) {
+  const payload = await validateCreateUserInput(body, {
+    requirePassword: false,
+    requireCode: false,
+  })
+  const { username, displayName, role, email, errors } = payload
+
   if (Object.keys(errors).length > 0) {
     return badRequest(response, 'Revisa los datos del usuario.', errors)
+  }
+
+  const verificationCode = String(randomInt(100000, 1000000))
+  const { hash, salt } = hashPassword(verificationCode)
+
+  await query(
+    `UPDATE user_create_codes
+     SET used_at = NOW()
+     WHERE used_at IS NULL
+       AND (LOWER(email) = LOWER($1) OR LOWER(target_username) = LOWER($2))`,
+    [email, username]
+  )
+
+  await query(
+    `INSERT INTO user_create_codes
+      (email, code_hash, code_salt, target_username, target_role, requested_by, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW() + INTERVAL '10 minutes')`,
+    [email, hash, salt, username, role, currentUser.id]
+  )
+
+  console.warn(`[backend] Codigo de alta para ${email}: ${verificationCode}`)
+
+  try {
+    await sendUserVerificationEmail({
+      to: email,
+      name: displayName,
+      code: verificationCode,
+      role,
+    })
+  } catch (error) {
+    console.error(
+      '[backend] Error enviando codigo de alta:',
+      error?.message || error
+    )
+    return sendJson(response, 502, {
+      error: 'No se pudo enviar el codigo por correo.',
+    })
+  }
+
+  return ok(response, {
+    success: true,
+    message: 'Codigo enviado al correo del usuario.',
+    verificationCode:
+      process.env.NODE_ENV === 'production' ? undefined : verificationCode,
+  })
+}
+
+async function handleCreateUser(response, body, currentUser) {
+  const payload = await validateCreateUserInput(body, {
+    requirePassword: true,
+    requireCode: true,
+  })
+  const { username, displayName, role, email, password, verificationCode, errors } =
+    payload
+
+  if (Object.keys(errors).length > 0) {
+    return badRequest(response, 'Revisa los datos del usuario.', errors)
+  }
+
+  const codeResult = await query(
+    `SELECT *
+     FROM user_create_codes
+     WHERE used_at IS NULL
+       AND LOWER(email) = LOWER($1)
+       AND LOWER(target_username) = LOWER($2)
+       AND target_role = $3
+     ORDER BY created_at DESC
+     LIMIT 1`,
+    [email, username, role]
+  )
+
+  const codeRow = codeResult.rows[0]
+
+  if (!codeRow) {
+    return badRequest(response, 'Solicita un codigo de validacion.', {
+      verificationCode: 'Solicita un codigo para este correo y usuario.',
+    })
+  }
+
+  if (new Date(codeRow.expires_at) < new Date()) {
+    return badRequest(response, 'El codigo ya expiro.', {
+      verificationCode: 'El codigo ya expiro. Solicita uno nuevo.',
+    })
+  }
+
+  if (Number(codeRow.attempts) >= 5) {
+    return badRequest(response, 'Solicita un codigo nuevo.', {
+      verificationCode: 'Demasiados intentos. Solicita un codigo nuevo.',
+    })
+  }
+
+  if (!verifyPassword(verificationCode, codeRow.code_salt, codeRow.code_hash)) {
+    await query(
+      `UPDATE user_create_codes
+       SET attempts = attempts + 1
+       WHERE id = $1`,
+      [codeRow.id]
+    )
+    return badRequest(response, 'Codigo incorrecto.', {
+      verificationCode: 'Codigo incorrecto.',
+    })
   }
 
   const { hash, salt } = hashPassword(password)
@@ -605,17 +794,26 @@ async function handleCreateUser(response, body, currentUser) {
   try {
     const result = await query(
       `INSERT INTO users
-        (username, display_name, role, password_hash, password_salt, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id, username, display_name, role, active, created_at`,
-      [username, displayName, role, hash, salt, currentUser.id]
+        (username, display_name, role, password_hash, password_salt,
+         email, email_verified, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, TRUE, $7)
+       RETURNING id, username, display_name, role, active, email, created_at`,
+      [username, displayName, role, hash, salt, email, currentUser.id]
+    )
+
+    await query(
+      `UPDATE user_create_codes
+       SET used_at = NOW()
+       WHERE id = $1`,
+      [codeRow.id]
     )
 
     created(response, { user: publicUser(result.rows[0]) })
   } catch (error) {
     if (error.code === '23505') {
-      return badRequest(response, 'Ese usuario ya existe.', {
+      return badRequest(response, 'Ese usuario o correo ya existe.', {
         username: 'Ese usuario ya existe.',
+        email: 'Ese correo ya esta en uso.',
       })
     }
     throw error
@@ -899,6 +1097,11 @@ async function handleRequest(request, response) {
     return handleLogin(response, body)
   }
 
+  if (pathname === '/api/auth/recovery/admins' && method === 'GET') {
+    const admins = await listRecoveryAdmins()
+    return ok(response, { admins: admins.map(publicRecoveryAdmin) })
+  }
+
   if (pathname === '/api/auth/recovery/request' && method === 'POST') {
     return handleRequestPasswordRecovery(response, body)
   }
@@ -943,7 +1146,7 @@ async function handleRequest(request, response) {
   if (pathname === '/api/users' && method === 'GET') {
     if (!requireRole(currentUser, ['admin'])) return forbidden(response)
     const result = await query(
-      `SELECT id, username, display_name, role, active, created_at
+      `SELECT id, username, display_name, role, active, email, created_at
        FROM users
        WHERE active = TRUE
        ORDER BY created_at DESC`
@@ -954,6 +1157,11 @@ async function handleRequest(request, response) {
   if (pathname === '/api/users' && method === 'POST') {
     if (!requireRole(currentUser, ['admin'])) return forbidden(response)
     return handleCreateUser(response, body, currentUser)
+  }
+
+  if (pathname === '/api/users/verification-code' && method === 'POST') {
+    if (!requireRole(currentUser, ['admin'])) return forbidden(response)
+    return handleRequestUserVerificationCode(response, body, currentUser)
   }
 
   const userMatch = pathname.match(/^\/api\/users\/(\d+)$/)
@@ -970,7 +1178,7 @@ async function handleRequest(request, response) {
   if (pathname === '/api/rps' && method === 'GET') {
     if (!requireRole(currentUser, ['admin'])) return forbidden(response)
     const result = await query(
-      `SELECT id, username, display_name, role, active, created_at
+      `SELECT id, username, display_name, role, active, email, created_at
        FROM users
        WHERE role = 'rp' AND active = TRUE
        ORDER BY display_name`

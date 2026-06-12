@@ -60,7 +60,7 @@ export async function getUserFromRequest(request) {
   if (!payload?.sub) return null
 
   const result = await query(
-    `SELECT id, username, display_name, role, active, created_at
+    `SELECT id, username, display_name, role, active, email, created_at
      FROM users
      WHERE id = $1 AND active = TRUE`,
     [payload.sub]
