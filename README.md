@@ -23,6 +23,10 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=BlackoutAdmin2026!
 ADMIN_NAME=Administrador Blackout
 ADMIN_RECOVERY_EMAIL=admin@blackout.local
+ADMIN_NOTIFICATION_EMAIL=admin@blackout.local
+BREVO_API_KEY=
+BREVO_SENDER_EMAIL=admin@blackout.local
+BREVO_SENDER_NAME=Blackout Reservaciones
 PORT=4000
 PGSSL=false
 NODE_ENV=development
@@ -41,6 +45,9 @@ Opcion con Blueprint:
    - `JWT_SECRET`
    - `ADMIN_PASSWORD`
    - `ADMIN_RECOVERY_EMAIL`
+   - `ADMIN_NOTIFICATION_EMAIL`
+   - `BREVO_API_KEY`
+   - `BREVO_SENDER_EMAIL`
 5. Deploy.
 
 Opcion manual:
@@ -61,6 +68,10 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=clave-segura
 ADMIN_NAME=Administrador Blackout
 ADMIN_RECOVERY_EMAIL=correo-del-admin
+ADMIN_NOTIFICATION_EMAIL=correo-que-recibe-alertas
+BREVO_API_KEY=clave-api-de-brevo
+BREVO_SENDER_EMAIL=correo-remitente-verificado
+BREVO_SENDER_NAME=Blackout Reservaciones
 ```
 
 En Render no necesitas `VITE_API_URL` si subes frontend y backend juntos, porque la app llama a `/api` en el mismo dominio.

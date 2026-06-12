@@ -29,3 +29,11 @@ services:
         value: Administrador Blackout
       - key: ADMIN_RECOVERY_EMAIL
         sync: false
+      - key: ADMIN_NOTIFICATION_EMAIL
+        sync: false
+      - key: BREVO_API_KEY
+        sync: false
+      - key: BREVO_SENDER_EMAIL
+        sync: false
+      - key: BREVO_SENDER_NAME
+        value: Blackout Reservaciones

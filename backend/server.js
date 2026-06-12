@@ -6,6 +6,11 @@ import { randomInt } from 'node:crypto'
 import './env.js'
 import { createToken, getUserFromRequest, requireRole } from './auth.js'
 import { initializeDatabase, query, hashPassword, verifyPassword } from './db.js'
+import {
+  sendAdminReservationEmail,
+  sendPasswordRecoveryEmail,
+  sendReservationReceivedEmail,
+} from './mail.js'
 
 const port = Number(process.env.PORT || 4000)
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -205,6 +210,37 @@ function validateReservationDate(value) {
   }
 
   return ''
+}
+
+async function sendReservationEmails(reservation) {
+  const jobs = []
+  const adminEmail = cleanEmail(
+    process.env.ADMIN_NOTIFICATION_EMAIL || process.env.ADMIN_RECOVERY_EMAIL
+  )
+
+  if (isEmail(reservation.customer_email)) {
+    jobs.push(
+      sendReservationReceivedEmail({
+        to: reservation.customer_email,
+        name: reservation.customer_name,
+        reservation,
+      })
+    )
+  }
+
+  if (String(reservation.notes || '').startsWith('[WEB]') && isEmail(adminEmail)) {
+    jobs.push(sendAdminReservationEmail({ to: adminEmail, reservation }))
+  }
+
+  if (jobs.length === 0) return
+
+  const results = await Promise.allSettled(jobs)
+
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      console.error('[backend] Error enviando correo:', result.reason?.message || result.reason)
+    }
+  }
 }
 
 function publicUser(row) {
@@ -458,6 +494,12 @@ async function handleRequestPasswordRecovery(response, body) {
   console.warn(
     `[backend] Codigo de recuperacion admin para ${email}: ${resetCode}`
   )
+
+  await sendPasswordRecoveryEmail({
+    to: user.email,
+    name: user.display_name,
+    code: resetCode,
+  })
 
   ok(response, {
     success: true,
@@ -760,7 +802,11 @@ async function handleCreateReservation(response, body, currentUser) {
     ]
   )
 
-  created(response, { reservation: result.rows[0] })
+  const savedReservation = result.rows[0]
+
+  await sendReservationEmails(savedReservation)
+
+  created(response, { reservation: savedReservation })
 }
 
 async function handleCreatePublicReservation(response, body) {
