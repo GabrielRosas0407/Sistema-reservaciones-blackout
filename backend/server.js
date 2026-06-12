@@ -1,15 +1,33 @@
 import { createServer } from 'node:http'
-import { URL } from 'node:url'
+import { createReadStream, existsSync, statSync } from 'node:fs'
+import { dirname, extname, normalize, resolve, sep } from 'node:path'
+import { URL, fileURLToPath } from 'node:url'
 import { randomInt } from 'node:crypto'
 import './env.js'
 import { createToken, getUserFromRequest, requireRole } from './auth.js'
 import { initializeDatabase, query, hashPassword, verifyPassword } from './db.js'
 
 const port = Number(process.env.PORT || 4000)
+const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), '..')
+const distDir = resolve(rootDir, 'dist')
 const allowedPeopleCounts = new Set([2, 3, 4, 5, 7, 10])
 const allowedReservationTimes = new Set(['21:00', '22:00', '23:00'])
 const allowedTableTypes = new Set(['Acceso general', 'Mesa estandar', 'Mesa VIP'])
 const allowedEvents = new Set(['Evento privado'])
+const mimeTypes = {
+  '.css': 'text/css; charset=utf-8',
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.png': 'image/png',
+  '.svg': 'image/svg+xml',
+  '.txt': 'text/plain; charset=utf-8',
+  '.webp': 'image/webp',
+}
 
 function sendJson(response, status, payload) {
   response.writeHead(status, {
@@ -27,6 +45,13 @@ function ok(response, payload = {}) {
 
 function created(response, payload = {}) {
   sendJson(response, 201, payload)
+}
+
+function sendText(response, status, message) {
+  response.writeHead(status, {
+    'Content-Type': 'text/plain; charset=utf-8',
+  })
+  response.end(message)
 }
 
 function badRequest(response, message, details = undefined) {
@@ -51,6 +76,74 @@ async function readJson(request) {
   const raw = Buffer.concat(chunks).toString('utf8')
   if (!raw) return {}
   return JSON.parse(raw)
+}
+
+function streamFile(response, filePath, method = 'GET') {
+  const extension = extname(filePath).toLowerCase()
+  const isIndex = filePath.endsWith(`${sep}index.html`)
+
+  response.writeHead(200, {
+    'Content-Type': mimeTypes[extension] || 'application/octet-stream',
+    'Cache-Control': isIndex ? 'no-cache' : 'public, max-age=31536000, immutable',
+  })
+
+  if (method === 'HEAD') {
+    response.end()
+    return
+  }
+
+  createReadStream(filePath).pipe(response)
+}
+
+function serveFrontend(request, response, pathname) {
+  const method = request.method || 'GET'
+
+  if (!['GET', 'HEAD'].includes(method)) {
+    sendText(response, 404, 'Ruta no encontrada')
+    return true
+  }
+
+  if (!existsSync(distDir)) {
+    sendText(
+      response,
+      404,
+      'Frontend no construido. Ejecuta npm run build antes de iniciar el servidor.'
+    )
+    return true
+  }
+
+  let decodedPath = '/'
+
+  try {
+    decodedPath = decodeURIComponent(pathname)
+  } catch {
+    decodedPath = '/'
+  }
+
+  const normalizedPath = normalize(decodedPath).replace(/^(\.\.[/\\])+/, '')
+  const requestedPath = normalizedPath === sep ? 'index.html' : `.${normalizedPath}`
+  const staticFilePath = resolve(distDir, requestedPath)
+  const allowedPrefix = `${distDir}${sep}`
+
+  if (staticFilePath !== distDir && !staticFilePath.startsWith(allowedPrefix)) {
+    sendText(response, 403, 'Acceso denegado')
+    return true
+  }
+
+  if (existsSync(staticFilePath) && statSync(staticFilePath).isFile()) {
+    streamFile(response, staticFilePath, method)
+    return true
+  }
+
+  const indexPath = resolve(distDir, 'index.html')
+
+  if (existsSync(indexPath)) {
+    streamFile(response, indexPath, method)
+    return true
+  }
+
+  sendText(response, 404, 'Frontend no encontrado')
+  return true
 }
 
 function cleanText(value) {
@@ -733,6 +826,10 @@ async function handleRequest(request, response) {
   const url = new URL(request.url, `http://${request.headers.host}`)
   const pathname = url.pathname
   const method = request.method || 'GET'
+
+  if (!pathname.startsWith('/api')) {
+    return serveFrontend(request, response, pathname)
+  }
 
   if (method === 'OPTIONS') {
     response.writeHead(204, {

@@ -1,0 +1,31 @@
+databases:
+  - name: blackout-db
+    plan: free
+
+services:
+  - type: web
+    name: blackout-reservaciones
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run server
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 22
+      - key: DATABASE_URL
+        fromDatabase:
+          name: blackout-db
+          property: connectionString
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        value: Administrador Blackout
+      - key: ADMIN_RECOVERY_EMAIL
+        sync: false

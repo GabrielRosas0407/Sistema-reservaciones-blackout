@@ -1,73 +1,66 @@
-# React + TypeScript + Vite
+# Sistema de reservaciones Blackout
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Aplicacion web para reservaciones, panel administrativo, usuarios RP y reportes internos de Blackout.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
+npm run dev
+npm run dev:backend
+npm run build
+npm run server
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Variables de entorno
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Copia `.env.example` como `.env` para desarrollo local.
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```env
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/blackout
+JWT_SECRET=cambia-esto-por-una-clave-larga-y-secreta
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=BlackoutAdmin2026!
+ADMIN_NAME=Administrador Blackout
+ADMIN_RECOVERY_EMAIL=admin@blackout.local
+PORT=4000
+PGSSL=false
+NODE_ENV=development
 ```
+
+## Render
+
+El repo incluye `render.yaml` para desplegar como un solo Web Service con PostgreSQL.
+
+Opcion con Blueprint:
+
+1. En Render, elige `New` -> `Blueprint`.
+2. Conecta el repo `Sistema-reservaciones-blackout`.
+3. Render detectara `render.yaml`.
+4. Define los valores secretos que pide Render:
+   - `JWT_SECRET`
+   - `ADMIN_PASSWORD`
+   - `ADMIN_RECOVERY_EMAIL`
+5. Deploy.
+
+Opcion manual:
+
+- Tipo: `Web Service`
+- Runtime: `Node`
+- Build Command: `npm ci && npm run build`
+- Start Command: `npm run server`
+- Health Check Path: `/api/health`
+
+Variables en Render:
+
+```env
+NODE_ENV=production
+DATABASE_URL=la_url_de_postgres
+JWT_SECRET=clave-larga-y-segura
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=clave-segura
+ADMIN_NAME=Administrador Blackout
+ADMIN_RECOVERY_EMAIL=correo-del-admin
+```
+
+En Render no necesitas `VITE_API_URL` si subes frontend y backend juntos, porque la app llama a `/api` en el mismo dominio.
